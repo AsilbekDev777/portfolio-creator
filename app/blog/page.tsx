@@ -1,9 +1,29 @@
-import { title } from "@/components/primitives";
+"use client"
+import {useEffect, useState} from "react";
+import {Card} from "@heroui/card";
 
 export default function BlogPage() {
+  const message = "This page will be created soon...";
+  const [displayed, setDisplayed] = useState("");
+
+  useEffect(() => {
+    let i = 0;
+    const interval = setInterval(() => {
+      setDisplayed(message.slice(0, i));
+      i++;
+      if (i > message.length) clearInterval(interval);
+    }, 80);
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <div>
-      <h1 className={title()}>Blog</h1>
+    <div className="w-full h-[650px] overflow-hidden flex items-center justify-center bg-white">
+      <Card className="w-full max-w-6xl flex items-center justify-center p-10" radius="none" shadow="none">
+        <h2 className="text-3xl font-semibold text-center w-full">
+          {displayed}
+        </h2>
+      </Card>
     </div>
   );
 }
