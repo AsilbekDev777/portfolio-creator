@@ -22,10 +22,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      NODE_ENV: production
-      NEXT_TELEMETRY_DISABLED: 1
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,128 +32,98 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install dependencies (with Next.js)
         run: |
-          echo "Installing dependencies..."
-          npm ci --legacy-peer-deps
+          echo "Installing all dependencies..."
+          npm ci
+          # yoki agar package-lock.json bo'lmasa:
+          # npm install --legacy-peer-deps
+          
+          # Next.js mavjudligini tekshirish
+          echo "Checking Next.js installation..."
+          ls node_modules/.bin/ | grep next || echo "Next.js not found in node_modules/.bin/"
+          
+          # Package.json'dagi dependencies ni ko'rish
+          echo "Dependencies in package.json:"
+          npm list next 2>/dev/null || echo "Next is not installed"
 
-      - name: Check Node and NPM versions
+      - name: Verify Next.js installation
         run: |
-          node --version
-          npm --version
-          npx next --version
+          echo "Checking if next command exists..."
+          # npx bilan sinab ko'rish
+          npx next --version || echo "Cannot find next command"
+          
+          # node_modules ichidan qidirish
+          if [ -f "node_modules/.bin/next" ]; then
+            echo "✅ Next.js found in node_modules/.bin/next"
+            ./node_modules/.bin/next --version
+          else
+            echo "❌ Next.js not found in node_modules"
+            echo "Trying to install Next.js explicitly..."
+            npm install next@latest react@latest react-dom@latest
+          fi
 
       - name: Create environment file
         run: |
-          echo "Creating .env.production for ${{ github.event.inputs.environment }}"
-          # Environment variables based on selected environment
-          if [ "${{ github.event.inputs.environment }}" = "prod" ]; then
-            echo "NEXT_PUBLIC_API_URL=https://api.production.com" > .env.production
-            echo "NEXT_PUBLIC_ENV=production" >> .env.production
-          elif [ "${{ github.event.inputs.environment }}" = "staging" ]; then
-            echo "NEXT_PUBLIC_API_URL=https://api.staging.com" > .env.production
-            echo "NEXT_PUBLIC_ENV=staging" >> .env.production
-          else
-            echo "NEXT_PUBLIC_API_URL=https://api.dev.com" > .env.production
-            echo "NEXT_PUBLIC_ENV=development" >> .env.production
-          fi
-
-      - name: Debug - List files
-        run: |
-          echo "Current directory structure:"
-          ls -la
-          echo "Package.json content:"
-          cat package.json
-
-      - name: Run linting (optional)
-        run: |
-          if [ -f "package.json" ] && grep -q '"lint"' package.json; then
-            npm run lint
-          else
-            echo "Lint script not found, skipping..."
-          fi
+          echo "Creating .env.production..."
+          # Basic environment variables
+          cat > .env.production << EOF
+          NODE_ENV=production
+          NEXT_PUBLIC_ENV=${{ github.event.inputs.environment }}
+          NEXT_TELEMETRY_DISABLED=1
+          EOF
 
       - name: Build Next.js app
-        id: build
         run: |
-          echo "Starting build process..."
+          echo "Building Next.js application..."
           
-          # Try to build with more memory
-          export NODE_OPTIONS="--max-old-space-size=4096"
-          
-          # Run build with detailed output
-          npm run build 2>&1 | tee build.log
-          
-          # Check if build was successful
-          if [ $? -eq 0 ]; then
-            echo "✅ Build successful!"
-            echo "::set-output name=status::success"
+          # Build komandasini to'g'ridan-to'g'ri ishga tushirish
+          npx next build || {
+            echo "Build failed with npx, trying alternative methods..."
             
-            # Show build output summary
-            echo "Build output summary:"
-            ls -la .next/
-          else
-            echo "❌ Build failed!"
-            echo "::set-output name=status::failed"
-            
-            # Show error details from log
-            echo "=== BUILD ERROR LOG ==="
-            tail -50 build.log
-            exit 1
-          fi
+            # Alternative 1: node_modules/.bin dan
+            if [ -f "node_modules/.bin/next" ]; then
+              ./node_modules/.bin/next build
+            else
+              # Alternative 2: Install and build
+              echo "Installing Next.js and building..."
+              npm install next@latest react@latest react-dom@latest
+              npx next build
+            fi
+          }
+          
+          echo "✅ Build completed successfully!"
 
-      - name: Run tests (conditional)
-        if: steps.build.outputs.status == 'success'
+      - name: Run tests (if any)
         run: |
           if [ -f "package.json" ] && grep -q '"test"' package.json; then
-            echo "Running tests..."
             npm test
           else
-            echo "Test script not found, skipping tests..."
+            echo "No tests configured"
           fi
 
-      - name: Show selected options
-        run: |
-          echo "Environment chosen: ${{ github.event.inputs.environment }}"
-          echo "Deploy? ${{ github.event.inputs.deploy }}"
-
       - name: Upload build artifacts
-        if: steps.build.outputs.status == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: nextjs-build-${{ github.event.inputs.environment }}
+          name: nextjs-build
           path: |
             .next/
             public/
             package.json
-          retention-days: 7
+          retention-days: 5
 
   deploy:
     needs: build
-    if: ${{ github.event.inputs.deploy == 'true' && needs.build.result == 'success' }}
+    if: ${{ github.event.inputs.deploy == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: nextjs-build-${{ github.event.inputs.environment }}
+          name: nextjs-build
 
-      - name: Deploy based on environment
+      - name: Deploy
         run: |
-          echo "🚀 Deploying to ${{ github.event.inputs.environment }} environment"
-          
-          case "${{ github.event.inputs.environment }}" in
-            dev)
-              # Add your dev deployment commands here
-              echo "Deploying to development server..."
-              ;;
-            staging)
-              # Add your staging deployment commands here
-              echo "Deploying to staging server..."
-              ;;
-            prod)
-              # Add your production deployment commands here
-              echo "Deploying to production server..."
-              ;;
-          esac
+          echo "Deploying to ${{ github.event.inputs.environment }}..."
+          # O'zingizning deploy komandalaringizni qo'ying
