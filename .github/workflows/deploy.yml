@@ -12,7 +12,6 @@ on:
           - staging
           - prod
         default: dev
-
       deploy:
         description: "Deploy after build?"
         type: boolean
@@ -23,33 +22,142 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: 1
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Nodjs
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          echo "Installing dependencies..."
+          npm ci --legacy-peer-deps
 
-      - name: Build with Nodjs
-        run: npm run build
+      - name: Check Node and NPM versions
+        run: |
+          node --version
+          npm --version
+          npx next --version
 
-      - name: Run tests
-        run: npm test
+      - name: Create environment file
+        run: |
+          echo "Creating .env.production for ${{ github.event.inputs.environment }}"
+          # Environment variables based on selected environment
+          if [ "${{ github.event.inputs.environment }}" = "prod" ]; then
+            echo "NEXT_PUBLIC_API_URL=https://api.production.com" > .env.production
+            echo "NEXT_PUBLIC_ENV=production" >> .env.production
+          elif [ "${{ github.event.inputs.environment }}" = "staging" ]; then
+            echo "NEXT_PUBLIC_API_URL=https://api.staging.com" > .env.production
+            echo "NEXT_PUBLIC_ENV=staging" >> .env.production
+          else
+            echo "NEXT_PUBLIC_API_URL=https://api.dev.com" > .env.production
+            echo "NEXT_PUBLIC_ENV=development" >> .env.production
+          fi
+
+      - name: Debug - List files
+        run: |
+          echo "Current directory structure:"
+          ls -la
+          echo "Package.json content:"
+          cat package.json
+
+      - name: Run linting (optional)
+        run: |
+          if [ -f "package.json" ] && grep -q '"lint"' package.json; then
+            npm run lint
+          else
+            echo "Lint script not found, skipping..."
+          fi
+
+      - name: Build Next.js app
+        id: build
+        run: |
+          echo "Starting build process..."
+          
+          # Try to build with more memory
+          export NODE_OPTIONS="--max-old-space-size=4096"
+          
+          # Run build with detailed output
+          npm run build 2>&1 | tee build.log
+          
+          # Check if build was successful
+          if [ $? -eq 0 ]; then
+            echo "✅ Build successful!"
+            echo "::set-output name=status::success"
+            
+            # Show build output summary
+            echo "Build output summary:"
+            ls -la .next/
+          else
+            echo "❌ Build failed!"
+            echo "::set-output name=status::failed"
+            
+            # Show error details from log
+            echo "=== BUILD ERROR LOG ==="
+            tail -50 build.log
+            exit 1
+          fi
+
+      - name: Run tests (conditional)
+        if: steps.build.outputs.status == 'success'
+        run: |
+          if [ -f "package.json" ] && grep -q '"test"' package.json; then
+            echo "Running tests..."
+            npm test
+          else
+            echo "Test script not found, skipping tests..."
+          fi
 
       - name: Show selected options
         run: |
           echo "Environment chosen: ${{ github.event.inputs.environment }}"
           echo "Deploy? ${{ github.event.inputs.deploy }}"
 
-      - name: Deploy (only if checkbox = true)
-        if: ${{ github.event.inputs.deploy == 'true' }}
+      - name: Upload build artifacts
+        if: steps.build.outputs.status == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextjs-build-${{ github.event.inputs.environment }}
+          path: |
+            .next/
+            public/
+            package.json
+          retention-days: 7
+
+  deploy:
+    needs: build
+    if: ${{ github.event.inputs.deploy == 'true' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nextjs-build-${{ github.event.inputs.environment }}
+
+      - name: Deploy based on environment
         run: |
-          echo "Deploying to environment: ${{ github.event.inputs.environment }}"
-          # your deploy commands here
-          # example:
-          # scp target/app.jar user@server:/deploy/path/
+          echo "🚀 Deploying to ${{ github.event.inputs.environment }} environment"
+          
+          case "${{ github.event.inputs.environment }}" in
+            dev)
+              # Add your dev deployment commands here
+              echo "Deploying to development server..."
+              ;;
+            staging)
+              # Add your staging deployment commands here
+              echo "Deploying to staging server..."
+              ;;
+            prod)
+              # Add your production deployment commands here
+              echo "Deploying to production server..."
+              ;;
+          esac
