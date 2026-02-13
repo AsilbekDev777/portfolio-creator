@@ -1,33 +1,44 @@
-name: Nextjs CI/CD
+name: Deploy to Netlify (Next.js)
 
 on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Select environment"
-        type: choice
-        required: true
-        options: [dev, staging, prod]
-        default: dev
-      deploy:
-        description: "Deploy after build?"
-        type: boolean
-        required: true
-        default: false
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: netlify-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to Netlify
+        run: |
+          npx netlify deploy \
+            --dir=.next \
+            --auth $NETLIFY_AUTH_TOKEN \
+            --site $NETLIFY_SITE_ID \
+            $([[ "${{ github.event_name }}" == "push" ]] && echo "--prod" || echo "")
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
